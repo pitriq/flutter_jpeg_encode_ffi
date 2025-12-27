@@ -35,12 +35,35 @@
 #ifndef JO_INCLUDE_JPEG_H
 #define JO_INCLUDE_JPEG_H
 
+#include <stddef.h>
+
 // To get a header file for this, either cut and paste the header,
 // or create jo_jpeg.h, #define JO_JPEG_HEADER_FILE_ONLY, and
 // then include jo_jpeg.c from it.
 
 // Returns false on failure
 FFI_PLUGIN_EXPORT int jo_write_jpg(const char *filename, const char *data, int width, int height, int comp, int quality);
+
+// Memory buffer result structure
+typedef struct {
+    unsigned char *data;   // Pointer to JPEG data (caller must free with jo_free_buffer)
+    size_t size;           // Size of the JPEG data in bytes
+} JpegEncodeResult;
+
+// Subsampling mode constants
+#define JO_SUBSAMPLE_AUTO -1   // Auto: 4:2:0 if quality <= 90, else 4:4:4
+#define JO_SUBSAMPLE_444   0   // Force 4:4:4 (no chroma subsampling, higher quality)
+#define JO_SUBSAMPLE_420   1   // Force 4:2:0 (chroma subsampling, smaller files)
+
+// Encodes JPEG to memory buffer. Returns result with data pointer and size.
+// On failure, result.data will be NULL and result.size will be 0.
+// Caller MUST call jo_free_buffer(result.data) when done.
+//
+// subsample_mode: JO_SUBSAMPLE_AUTO (-1), JO_SUBSAMPLE_444 (0), or JO_SUBSAMPLE_420 (1)
+FFI_PLUGIN_EXPORT JpegEncodeResult jo_encode_jpg_to_mem(const char *data, int width, int height, int comp, int quality, int subsample_mode);
+
+// Frees a buffer allocated by jo_encode_jpg_to_mem
+FFI_PLUGIN_EXPORT void jo_free_buffer(unsigned char *buffer);
 
 #endif // JO_INCLUDE_JPEG_H
 

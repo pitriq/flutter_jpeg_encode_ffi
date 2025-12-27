@@ -53,4 +53,66 @@ class JpegEncodeFfiBindings {
   late final _jo_write_jpg = _jo_write_jpgPtr.asFunction<
       int Function(
           ffi.Pointer<ffi.Char>, ffi.Pointer<ffi.Char>, int, int, int, int)>();
+
+  /// Encodes JPEG to memory buffer. Returns result with data pointer and size.
+  /// On failure, result.data will be NULL and result.size will be 0.
+  /// Caller MUST call jo_free_buffer(result.data) when done.
+  ///
+  /// subsample_mode: JO_SUBSAMPLE_AUTO (-1), JO_SUBSAMPLE_444 (0), or JO_SUBSAMPLE_420 (1)
+  JpegEncodeResult jo_encode_jpg_to_mem(
+    ffi.Pointer<ffi.Char> data,
+    int width,
+    int height,
+    int comp,
+    int quality,
+    int subsample_mode,
+  ) {
+    return _jo_encode_jpg_to_mem(
+      data,
+      width,
+      height,
+      comp,
+      quality,
+      subsample_mode,
+    );
+  }
+
+  late final _jo_encode_jpg_to_memPtr = _lookup<
+      ffi.NativeFunction<
+          JpegEncodeResult Function(ffi.Pointer<ffi.Char>, ffi.Int, ffi.Int,
+              ffi.Int, ffi.Int, ffi.Int)>>('jo_encode_jpg_to_mem');
+  late final _jo_encode_jpg_to_mem = _jo_encode_jpg_to_memPtr.asFunction<
+      JpegEncodeResult Function(
+          ffi.Pointer<ffi.Char>, int, int, int, int, int)>();
+
+  /// Frees a buffer allocated by jo_encode_jpg_to_mem
+  void jo_free_buffer(
+    ffi.Pointer<ffi.UnsignedChar> buffer,
+  ) {
+    return _jo_free_buffer(
+      buffer,
+    );
+  }
+
+  late final _jo_free_bufferPtr = _lookup<
+          ffi.NativeFunction<ffi.Void Function(ffi.Pointer<ffi.UnsignedChar>)>>(
+      'jo_free_buffer');
+  late final _jo_free_buffer = _jo_free_bufferPtr
+      .asFunction<void Function(ffi.Pointer<ffi.UnsignedChar>)>();
 }
+
+/// Memory buffer result structure
+final class JpegEncodeResult extends ffi.Struct {
+  /// Pointer to JPEG data (caller must free with jo_free_buffer)
+  external ffi.Pointer<ffi.UnsignedChar> data;
+
+  /// Size of the JPEG data in bytes
+  @ffi.Size()
+  external int size;
+}
+
+const int JO_SUBSAMPLE_AUTO = -1;
+
+const int JO_SUBSAMPLE_444 = 0;
+
+const int JO_SUBSAMPLE_420 = 1;

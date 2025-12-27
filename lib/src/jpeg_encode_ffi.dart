@@ -75,6 +75,56 @@ Future<void> encodeJpegToFile(
   if (result == 0) throw Exception('Native encode jpeg fail');
 }
 
+/// Encodes the image [image] to JPEG format and returns the bytes.
+///
+/// [quality] JPEG quality (1-100, default 95)
+/// [subsampling] Chroma subsampling mode:
+///   - [JpegSubsampling.auto_] (default): Uses 4:2:0 if quality <= 90, else 4:4:4
+///   - [JpegSubsampling.yuv444]: Force 4:4:4 (no subsampling, higher quality, larger files)
+///   - [JpegSubsampling.yuv420]: Force 4:2:0 (subsampling, smaller files)
+///
+/// Returns `Uint8List` containing the JPEG-encoded image data.
+Future<Uint8List> encodeJpegImageToBytes(
+  ui.Image image, {
+  int quality = 95,
+  JpegSubsampling subsampling = JpegSubsampling.auto_,
+}) async {
+  final bytes = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+  if (bytes == null) {
+    throw Exception('Could not convert image to byte array.');
+  }
+  final pixels = bytes.buffer.asUint8List();
+  
+  // Convert enum to int for FFI
+  final subsampleMode = switch (subsampling) {
+    JpegSubsampling.auto_ => -1,
+    JpegSubsampling.yuv444 => 0,
+    JpegSubsampling.yuv420 => 1,
+  };
+
+  final helperIsolateSendPort = await _helperIsolateSendPort;
+  final id = _nextRequestId++;
+  final request = _EncodeToMemRequest(
+    id,
+    pixels,
+    image.width,
+    image.height,
+    quality,
+    4, // RGBA has 4 components
+    subsampleMode,
+  );
+
+  final completer = Completer<Uint8List?>();
+  _memRequests[id] = completer;
+  helperIsolateSendPort.send(request);
+
+  final result = await completer.future;
+  if (result == null) {
+    throw Exception('Native JPEG encoding to memory failed');
+  }
+  return result;
+}
+
 const String _libName = 'jpeg_encode_ffi';
 
 /// The dynamic library in which the symbols for [JpegEncodeFfiBindings] can be found.
@@ -160,11 +210,73 @@ class _EncodeResponse {
   const _EncodeResponse(this.id, this.result);
 }
 
+/// Chroma subsampling mode for JPEG encoding
+enum JpegSubsampling {
+  /// Automatically determine based on quality (4:2:0 if quality <= 90, else 4:4:4)
+  auto_,
+  /// Force 4:4:4 - no chroma subsampling (higher quality, larger files)
+  yuv444,
+  /// Force 4:2:0 - chroma subsampling (smaller files)
+  yuv420,
+}
+
+/// Request for encoding to memory (returns bytes)
+class _EncodeToMemRequest with _Freeable {
+  _EncodeToMemRequest(
+    this.id,
+    this.pixels,
+    this.width,
+    this.height,
+    this.quality,
+    this.component,
+    this.subsampleMode,
+  );
+
+  final int id;
+  final Uint8List pixels;
+  final int width;
+  final int height;
+  final int quality;
+  final int component;
+  final int subsampleMode; // -1 = auto, 0 = 4:4:4, 1 = 4:2:0
+
+  ffi.Pointer<ffi.Uint8>? _pixelsPtr;
+
+  ffi.Pointer<ffi.Uint8> get pixelsPtr {
+    if (_pixelsPtr == null) {
+      var ptr = malloc<ffi.Uint8>(pixels.length);
+      ptr.asTypedList(pixels.length).setAll(0, pixels);
+      _pixelsPtr = ptr;
+    }
+    return _pixelsPtr!;
+  }
+
+  @override
+  void free() {
+    if (_pixelsPtr != null) {
+      malloc.free(_pixelsPtr!);
+      _pixelsPtr = null;
+    }
+  }
+}
+
+/// Response containing encoded JPEG bytes
+class _EncodeToMemResponse {
+  final int id;
+  final Uint8List? bytes;
+  final bool success;
+
+  const _EncodeToMemResponse(this.id, this.bytes, this.success);
+}
+
 /// Counter to identify [_EncodeRequest]s and [_EncodeResponse]s.
 int _nextRequestId = 0;
 
 /// Mapping from [_EncodeRequest] `id`s to the completers corresponding to the correct future of the pending request.
 final _requests = <int, Completer<int>>{};
+
+/// Mapping for memory encode requests
+final _memRequests = <int, Completer<Uint8List?>>{};
 
 /// The SendPort belonging to the helper isolate.
 Future<SendPort> _helperIsolateSendPort = () async {
@@ -190,6 +302,12 @@ Future<SendPort> _helperIsolateSendPort = () async {
         completer.complete(data.result);
         return;
       }
+      if (data is _EncodeToMemResponse) {
+        final completer = _memRequests[data.id]!;
+        _memRequests.remove(data.id);
+        completer.complete(data.bytes);
+        return;
+      }
       throw UnsupportedError('Unsupported message type: ${data.runtimeType}');
     });
 
@@ -209,6 +327,34 @@ Future<SendPort> _helperIsolateSendPort = () async {
               data.quality,
             );
             final response = _EncodeResponse(data.id, result);
+            sendPort.send(response);
+            return;
+          } finally {
+            data.free();
+          }
+        }
+        if (data is _EncodeToMemRequest) {
+          try {
+            final result = _bindings.jo_encode_jpg_to_mem(
+              data.pixelsPtr.cast(),
+              data.width,
+              data.height,
+              data.component,
+              data.quality,
+              data.subsampleMode,
+            );
+            
+            Uint8List? bytes;
+            if (result.data != ffi.nullptr && result.size > 0) {
+              // Copy the data to Dart-managed memory
+              bytes = Uint8List.fromList(
+                result.data.cast<ffi.Uint8>().asTypedList(result.size),
+              );
+              // Free the native buffer
+              _bindings.jo_free_buffer(result.data);
+            }
+            
+            final response = _EncodeToMemResponse(data.id, bytes, bytes != null);
             sendPort.send(response);
             return;
           } finally {

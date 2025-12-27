@@ -1,1 +1,1 @@
-export 'src/jpeg_encode_ffi.dart' show encodeJpegToFile, encodeJpegImageToFile;
+export 'src/jpeg_encode_ffi.dart' show encodeJpegToFile, encodeJpegImageToFile, encodeJpegImageToBytes, JpegSubsampling;
