@@ -77,6 +77,9 @@ Future<void> encodeJpegToFile(
 
 /// Encodes the image [image] to JPEG format and returns the bytes.
 ///
+/// This is a convenience wrapper around [encodeJpegToBytes] that extracts
+/// raw RGBA pixel data from a [ui.Image].
+///
 /// [quality] JPEG quality (1-100, default 95)
 /// [subsampling] Chroma subsampling mode:
 ///   - [JpegSubsampling.auto_] (default): Uses 4:2:0 if quality <= 90, else 4:4:4
@@ -93,8 +96,44 @@ Future<Uint8List> encodeJpegImageToBytes(
   if (bytes == null) {
     throw Exception('Could not convert image to byte array.');
   }
-  final pixels = bytes.buffer.asUint8List();
-  
+  return encodeJpegToBytes(
+    bytes.buffer.asUint8List(),
+    image.width,
+    image.height,
+    4, // RGBA
+    quality: quality,
+    subsampling: subsampling,
+  );
+}
+
+/// Encodes raw pixel data to JPEG format and returns the bytes.
+///
+/// [pixels] Raw pixel data (RGBA, RGB, or grayscale)
+/// [width] Image width in pixels
+/// [height] Image height in pixels
+/// [comp] Number of channels (1=grayscale, 3=RGB, 4=RGBA)
+/// [quality] JPEG quality (1-100, default 95)
+/// [subsampling] Chroma subsampling mode:
+///   - [JpegSubsampling.auto_] (default): Uses 4:2:0 if quality <= 90, else 4:4:4
+///   - [JpegSubsampling.yuv444]: Force 4:4:4 (no subsampling, higher quality, larger files)
+///   - [JpegSubsampling.yuv420]: Force 4:2:0 (subsampling, smaller files)
+///
+/// Returns `Uint8List` containing the JPEG-encoded image data.
+Future<Uint8List> encodeJpegToBytes(
+  Uint8List pixels,
+  int width,
+  int height,
+  int comp, {
+  int quality = 95,
+  JpegSubsampling subsampling = JpegSubsampling.auto_,
+}) async {
+  assert(pixels.isNotEmpty, 'pixels is empty');
+  assert(width > 0 && height > 0, 'invalid width or height');
+  assert(
+    comp == 1 || comp == 3 || comp == 4,
+    'component must be 1, 3, or 4',
+  );
+
   // Convert enum to int for FFI
   final subsampleMode = switch (subsampling) {
     JpegSubsampling.auto_ => -1,
@@ -107,10 +146,10 @@ Future<Uint8List> encodeJpegImageToBytes(
   final request = _EncodeToMemRequest(
     id,
     pixels,
-    image.width,
-    image.height,
+    width,
+    height,
     quality,
-    4, // RGBA has 4 components
+    comp,
     subsampleMode,
   );
 
